@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Data, caches and generated files
+data/
+cache/
+outputs/
+checkpoints/
+*.pt
+*.npz
+*.wav
+
+# SLURM logs
+*.out
+
+# Secrets
+.env
