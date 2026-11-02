@@ -34,3 +34,5 @@ checkpoints/
 .direnv/
 .DS_Store
 @eaDir/
+.envrc.local
+config.local.yaml
