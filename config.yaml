@@ -1,0 +1,39 @@
+# Machine-specific settings. Relative paths are resolved against this file's folder.
+# Use another file with --config <path> or the AUDIOINTERP_CONFIG environment variable.
+
+paths:
+  aibo: data/aibo        # FAU AIBO root, containing wav/ and labels/IS2009EmotionChallenge/
+  emodb: null            # audb cache root for EMoDB; null = audb default (~/audb)
+  hf_cache: null         # Hugging Face model cache; null = HF default (~/.cache/huggingface)
+  cache_dir: cache       # extracted activations and eGeMAPS features
+  output_dir: outputs    # probe results, SAE checkpoints, figures
+
+# Longer clips are truncated before extraction. 5 s covers ~99% of AIBO.
+max_duration_sec:
+  aibo: 5.0
+  emodb: 8.0
+
+# family picks the adapter in audiointerp/encoders.py: wav2vec2 or whisper.
+models:
+  wav2vec2-base:
+    hf_id: facebook/wav2vec2-base            # self-supervised pretraining only
+    family: wav2vec2
+  wav2vec2-base-960h:
+    hf_id: facebook/wav2vec2-base-960h       # wav2vec2-base fine-tuned for ASR on LibriSpeech 960 h
+    family: wav2vec2
+  wav2vec2-large-emotion:
+    hf_id: audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim   # large-robust cut to 12 layers, fine-tuned for arousal/dominance/valence
+    family: wav2vec2
+  whisper-small:
+    hf_id: openai/whisper-small              # encoder only: 12 layers x 768
+    family: whisper
+
+extraction:
+  conv_layers: false     # true: also keep each earlier conv block (conv_0, conv_1, ...), not only the CNN output
+
+# Per-frame activations are stored for a class-stratified subset of clips only.
+frames:
+  per_class: 50          # clips per emotion class
+  split: test            # train, val, test or all
+  seed: 0
+  dtype: float16

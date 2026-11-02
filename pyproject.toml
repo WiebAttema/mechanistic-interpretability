@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audiointerp"
+version = "0.1.0"
+description = "Layer-wise interpretability of frozen wav2vec 2.0 and Whisper encoders for speech emotion recognition"
+requires-python = ">=3.10"
+# Install PyTorch first, matching your GPU (see README).
+dependencies = [
+    "torch",
+    # Below 4.47: newer versions need PyTorch >= 2.4.
+    "transformers>=4.30,<4.47",
+    # Below 2: PyTorch 2.2 wheels are built against NumPy 1.x.
+    "numpy<2",
+    "scipy",
+    "scikit-learn",
+    "matplotlib",
+    "pyyaml",
+    "audiofile",
+    "audb",
+    "opensmile",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["audiointerp*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
