@@ -22,3 +22,15 @@ checkpoints/
 
 # Secrets
 .env
+.venv/
+.hf_cache
+.cache
+.direnv/
+.DS_Store
+@eaDir/
+.venv/
+.hf_cache
+.cache
+.direnv/
+.DS_Store
+@eaDir/

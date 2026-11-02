@@ -1,0 +1,64 @@
+{
+  description = "Devshell with nix-pyllow - make Python **just work** on NixOS";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    pyllow.url = "github:mauricege/nix-pyllow";
+  };
+
+  outputs = inputs @ {
+    self,
+    nixpkgs,
+    flake-parts,
+    pyllow,
+    ...
+  }:
+    flake-parts.lib.mkFlake {inherit inputs;} {
+      imports = [
+        inputs.pyllow.flakeModules.default
+      ];
+
+      systems = [
+        # systems for which you want to build the `perSystem` attributes
+        "x86_64-linux"
+        # ...
+      ];
+
+      perSystem = {
+        config,
+        self',
+        inputs',
+        pkgs,
+        system,
+        ...
+      }: let
+        # Selects the CUDA toolkit version 12.8 from the available CUDA packages in Nixpkgs.
+        # The `cudaPackages` attribute provides access to the full suite of CUDA tools and libraries for this version.
+        # To use a different CUDA version, replace `cudaPackages_12_3` with another version (e.g., `cudaPackages_11_8`).
+        # Individual components (such as `cuda`, `cudatoolkit`, `cudnn`, etc.) can be accessed as attributes of `cudaPackages`
+        # and added to the `packages` list in your devenv shell as needed.
+        # Example: `cudaPackages.cudatoolkit`, `cudaPackages.cudnn`, etc.
+        cudaPackages = pkgs.cudaPackages_12_8;
+      in {
+        _module.args.pkgs = import self.inputs.nixpkgs {
+          inherit system;
+          config = {
+            allowUnfree = true;
+          };
+        };
+        pyllow = {
+          backend = "nix-ld"; # "nix-ld" or "fhs"
+          shells.default = {
+            name = "go97xis";
+            packages = with pkgs; [
+              uv
+              zlib
+              # cudaPackages.cudatoolkit
+            ];
+            env = { "LD_LIBRARY_PATH" = "${pkgs.zlib}/lib:${pkgs.gcc.cc.lib}/lib:/run/opengl-driver/lib"; };
+          };
+        };
+      };
+    };
+}
