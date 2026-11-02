@@ -12,8 +12,7 @@ dependencies = [
     "torch",
     # Below 4.47: newer versions need PyTorch >= 2.4.
     "transformers>=4.30,<4.47",
-    # Below 2: PyTorch 2.2 wheels are built against NumPy 1.x.
-    "numpy<2",
+    "numpy",
     "scipy",
     "scikit-learn",
     "matplotlib",
