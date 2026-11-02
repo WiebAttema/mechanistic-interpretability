@@ -36,3 +36,4 @@ checkpoints/
 @eaDir/
 .envrc.local
 config.local.yaml
+logs/
