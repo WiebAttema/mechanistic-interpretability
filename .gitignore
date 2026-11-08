@@ -37,3 +37,5 @@ checkpoints/
 .envrc.local
 config.local.yaml
 logs/
+
+notes/

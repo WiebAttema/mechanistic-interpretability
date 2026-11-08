@@ -29,7 +29,7 @@ models:
     family: whisper
 
 extraction:
-  conv_layers: false     # true: also keep each earlier conv block (conv_0, conv_1, ...), not only the CNN output
+  conv_layers: true     # true: also keep each earlier conv block (conv_0, conv_1, ...), not only the CNN output
 
 # Per-frame activations are stored for a class-stratified subset of clips only.
 frames:
