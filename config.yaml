@@ -37,3 +37,9 @@ frames:
   split: test            # train, val, test or all
   seed: 0
   dtype: float16
+
+# A few random frames of every clip (all splits), for SAEs on per-frame inputs.
+frame_sample:
+  layers: [conv_0, conv_1, conv_2, conv_3, conv_4, conv_5, cnn]   # layers a model lacks are skipped
+  per_clip: 20
+  seed: 0

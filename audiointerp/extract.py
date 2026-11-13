@@ -2,8 +2,9 @@
 
 Every clip gets one mean-pooled vector per layer. A class-stratified subset of clips
 (config: frames) also gets its per-frame activations, which are too large to keep
-for everything. Output goes to <cache_dir>/activations/<dataset>/<model>/; see
-activations.py for the file layout.
+for everything. With frame_sample in the config, every clip also gives a few random
+frames of the chosen layers, for SAEs on per-frame inputs. Output goes to
+<cache_dir>/activations/<dataset>/<model>/; see activations.py for the file layout.
 
     python -m audiointerp.extract --dataset emodb --model wav2vec2-base
     python -m audiointerp.extract --dataset aibo --model whisper-small --limit 3   # smoke test
@@ -56,6 +57,12 @@ def main(args):
     hf_cache = cfg["paths"]["hf_cache"]
     encoder = load_encoder(model_cfg, device, cfg["extraction"]["conv_layers"],
                            cache_dir=str(hf_cache) if hf_cache else None)
+    sample_cfg = cfg.get("frame_sample")  # a few random frames of every clip, for per-frame SAEs
+    sample_layers = [name for name in sample_cfg["layers"] if name in encoder.layer_names] if sample_cfg else []
+    sample = {name: {"frames": [], "clip": []} for name in sample_layers}
+    rng = np.random.RandomState(sample_cfg["seed"]) if sample_cfg else None
+    if sample_layers:
+        print(f"Sample  : {sample_cfg['per_clip']} random frames per clip of {', '.join(sample_layers)}")
 
     pooled = {name: [] for name in encoder.layer_names}
     durations = []
@@ -65,6 +72,11 @@ def main(args):
         for name, frames in acts.items():
             pooled[name].append(frames.mean(dim=0))
         durations.append(len(signal) / SAMPLING_RATE)
+        for name in sample_layers:
+            n = len(acts[name])
+            picked = torch.from_numpy(np.sort(rng.choice(n, min(n, sample_cfg["per_clip"]), replace=False)))
+            sample[name]["frames"].append(acts[name][picked].to(frame_dtype))
+            sample[name]["clip"].append(torch.full((len(picked),), i))
 
         if i in frame_clips:
             torch.save({"file_path": clip.path, "label": labels.index(clip.label), "duration": durations[-1],
@@ -91,6 +103,11 @@ def main(args):
         "frame_clips": sorted(clips[i].id for i in frame_clips),
     }, path)
     print(f"Saved → {path}")
+    if sample_layers:
+        path = out_dir / "frame_sample.pt"
+        torch.save({name: {"frames": torch.cat(s["frames"]), "clip": torch.cat(s["clip"])}
+                    for name, s in sample.items()}, path)
+        print(f"Saved → {path}")
 
 
 if __name__ == "__main__":

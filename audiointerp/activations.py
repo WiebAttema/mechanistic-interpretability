@@ -9,6 +9,9 @@
 
 <cache_dir>/activations/<dataset>/<model>/frames/<clip id>.pt, for those clips:
     {"file_path", "label", "duration", "activations": {layer name: (frames, dim)}}
+
+<cache_dir>/activations/<dataset>/<model>/frame_sample.pt, with frame_sample in the config:
+    {layer name: {"frames": (n, dim) random frames of every clip, "clip": (n,) index into pooled.pt}}
 """
 from pathlib import Path
 
@@ -24,6 +27,14 @@ def load_pooled(cfg, dataset, model):
     if not path.exists():
         raise FileNotFoundError(
             f"{path} not found; run: python -m audiointerp.extract --dataset {dataset} --model {model}")
+    return torch.load(path, weights_only=True)
+
+
+def load_frame_sample(cfg, dataset, model):
+    path = activations_dir(cfg, dataset, model) / "frame_sample.pt"
+    if not path.exists():
+        raise FileNotFoundError(f"{path} not found; add frame_sample to the config and run: "
+                                f"python -m audiointerp.extract --dataset {dataset} --model {model}")
     return torch.load(path, weights_only=True)
 
 
