@@ -33,7 +33,8 @@ def main(args):
         split = split_frames(sample[layer]["clip"], speakers, args.dataset)
         mu, sd = zscore_stats(X[split["train"]])
         sae, info = train_sae((X[split["train"]] - mu) / sd, (X[split["val"]] - mu) / sd, args.dict_size, k,
-                              epochs=args.epochs, batch_size=args.batch_size, device=device, seed=args.seed)
+                              epochs=args.epochs, batch_size=args.batch_size, device=device, seed=args.seed,
+                              verbose=True)
         test_mse = reconstruction_mse(sae, X[split["test"]], mu, sd, device)
         save_checkpoint(checkpoint_path(cfg, args.dataset, args.model, f"{layer}_frames", args.sparsity), sae, mu, sd,
                         {"dataset": args.dataset, "model": args.model, "layer": layer, "sparsity": args.sparsity,

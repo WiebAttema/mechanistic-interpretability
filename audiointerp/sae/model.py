@@ -54,9 +54,9 @@ def sparsity_to_k(sparsity_pct, n_dict):
     return max(1, int((1 - sparsity_pct / 100.0) * n_dict))
 
 
-def train_sae(X_train, X_val, n_dict, k, epochs=150, lr=1e-3, batch_size=32, device="cpu", seed=0):
+def train_sae(X_train, X_val, n_dict, k, epochs=150, lr=1e-3, batch_size=32, device="cpu", seed=0, verbose=False):
     """Adam, lr 1e-3, batch 32 as in the paper, on standardized inputs. Keeps the epoch
-    with the lowest validation MSE."""
+    with the lowest validation MSE. verbose: print the train and validation MSE of every epoch."""
     torch.manual_seed(seed)
     model = TopKSAE(X_train.shape[1], n_dict, k).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -66,16 +66,21 @@ def train_sae(X_train, X_val, n_dict, k, epochs=150, lr=1e-3, batch_size=32, dev
     best_mse, best_state, best_epoch = math.inf, None, -1
     for epoch in range(epochs):
         model.train()
+        train_sum = 0.0
         for (xb,) in loader:
             optimizer.zero_grad()
             x_hat, _ = model(xb)
-            F.mse_loss(x_hat, xb).backward()
+            loss = F.mse_loss(x_hat, xb)
+            loss.backward()
             optimizer.step()
             model.renorm_decoder_()
+            train_sum += loss.detach() * len(xb)
 
         model.eval()
         with torch.no_grad():
             val_mse = F.mse_loss(model(X_val)[0], X_val).item()
+        if verbose:
+            print(f"    epoch {epoch:3d}: train mse {float(train_sum) / len(X_train):.4f}, val mse {val_mse:.4f}")
         if val_mse < best_mse:
             best_mse, best_epoch = val_mse, epoch
             best_state = {key: value.clone() for key, value in model.state_dict().items()}
