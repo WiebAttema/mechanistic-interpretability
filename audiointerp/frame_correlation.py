@@ -143,14 +143,66 @@ def plot_alpha_ratio(r, names, filters, active, model, path):
     save(fig, path)
 
 
+def conv_layout(config):
+    """{conv layer name: (step, seen)} of a wav2vec2 model config."""
+    layers = [f"conv_{i}" for i in range(len(config.conv_kernel) - 1)] + ["cnn"]
+    return dict(zip(layers, frame_layout(config.conv_kernel, config.conv_stride)))
+
+
+def sae_transforms(cfg, dataset, model, layers, sparsity):
+    """{layer: frames -> SAE units} for the layers that have a frame SAE at this sparsity."""
+    transforms = {}
+    for layer in layers:
+        path = checkpoint_path(cfg, dataset, model, f"{layer}_frames", sparsity)
+        if path.exists():
+            sae, ckpt = load_checkpoint(path)
+            transforms[layer] = lambda a, sae=sae, ckpt=ckpt: encode(sae, a, ckpt["mu"], ckpt["sd"], "cpu")
+    return transforms
+
+
+def load_aligned(cfg, dataset, model, layout, transforms=None):
+    """For every clip with per-frame eGeMAPS: per layer, the mean of the conv frames in each
+    eGeMAPS window (version A); the descriptors; and which frames are voiced. transforms
+    ({layer: function}) are applied to a clip's frames first, e.g. encoding with an SAE."""
+    aligned, egemaps, voiced = {layer: [] for layer in layout}, [], []
+    for path in sorted(egemaps_frames_dir(cfg, dataset).glob("*.pt")):
+        eg = torch.load(path, weights_only=True)
+        acts = load_frames(cfg, dataset, model, path.stem)["activations"]
+        # openSMILE's last frame takes whatever audio is left, so it is longer than 20 ms
+        start, end, values = eg["start"][:-1], eg["end"][:-1], eg["values"][:-1]
+        egemaps.append(values)
+        voiced.append(values[:, eg["names"].index(F0)] > 0)
+        for layer, (step, seen) in layout.items():
+            a = acts[layer].float()
+            if transforms and layer in transforms:
+                a = transforms[layer](a)
+            means, has_frames = align(a, frame_centres(len(a), step, seen), start, end)
+            assert has_frames.all(), f"{path.stem}, {layer}: an eGeMAPS window without conv frames"
+            aligned[layer].append(means)
+    return eg["names"], aligned, egemaps, voiced
+
+
+def per_descriptor(fn, acts, egemaps, voiced, names):
+    """fn(acts, descriptors) on all frames for the plain descriptors and on voiced frames for
+    the nz ones (pitch, voice quality, formants), put back together in the order of names (last axis)."""
+    nz = torch.tensor([name.endswith("nz") for name in names])
+    keep = [v.sum() >= 3 for v in voiced]  # clips with almost no voiced frames say nothing about pitch
+    plain = fn(acts, [e[:, ~nz] for e in egemaps])
+    voiced_only = fn([a[v] for a, v, k in zip(acts, voiced, keep) if k],
+                     [e[v][:, nz] for e, v, k in zip(egemaps, voiced, keep) if k])
+    out = torch.empty(plain.shape[:-1] + (len(names),))
+    out[..., ~nz], out[..., nz] = plain, voiced_only
+    return out
+
+
 def main(args):
     cfg = load_config(args.config)
     hf_cache = cfg["paths"]["hf_cache"]
     model = Wav2Vec2Model.from_pretrained(cfg["models"][args.model]["hf_id"],
                                           cache_dir=str(hf_cache) if hf_cache else None)
     conv = model.config
-    layers = [f"conv_{i}" for i in range(len(conv.conv_kernel) - 1)] + ["cnn"]
-    layout = dict(zip(layers, frame_layout(conv.conv_kernel, conv.conv_stride)))
+    layout = conv_layout(conv)
+    layers = list(layout)
     # what each conv_0 channel listens to is in its weights
     filters = model.feature_extractor.conv_layers[0].conv.weight.detach()
     # learned gain per channel of each conv block's norm (all 1 without one); about 0 = switched off
@@ -158,66 +210,34 @@ def main(args):
                  for layer, block, dim in zip(layers, model.feature_extractor.conv_layers, conv.conv_dim)}
     print("Active channels (norm gain above %.1f): " % ACTIVE
           + ", ".join(f"{layer} {int((gain.abs() > ACTIVE).sum())}" for layer, gain in norm_gain.items()))
-    saes = {}  # with --sae: frames described by SAE units instead of channels, where a frame SAE exists
+    # with --sae: frames described by SAE units instead of channels, where a frame SAE exists
+    transforms = sae_transforms(cfg, args.dataset, args.model, layers, args.sae) if args.sae is not None else {}
     if args.sae is not None:
-        for layer in layers:
-            path = checkpoint_path(cfg, args.dataset, args.model, f"{layer}_frames", args.sae)
-            if path.exists():
-                saes[layer] = load_checkpoint(path)
-        layers = list(saes)
+        layers = list(transforms)
+        layout = {layer: layout[layer] for layer in layers}
 
-    aligned = {version: {layer: [] for layer in layers} for version in ("A", "B")}
-    egemaps, voiced = [], []
-    for path in sorted(egemaps_frames_dir(cfg, args.dataset).glob("*.pt")):
-        eg = torch.load(path, weights_only=True)
-        acts = load_frames(cfg, args.dataset, args.model, path.stem)["activations"]
-        # openSMILE's last frame takes whatever audio is left, so it is longer than 20 ms
-        start, end, values = eg["start"][:-1], eg["end"][:-1], eg["values"][:-1]
-        egemaps.append(values)
-        voiced.append(values[:, eg["names"].index(F0)] > 0)
-        for layer in layers:
-            a = acts[layer].float()
-            if layer in saes:
-                sae, checkpoint = saes[layer]
-                a = encode(sae, a, checkpoint["mu"], checkpoint["sd"], "cpu")  # (frames, units)
-            means, has_frames = align(a, frame_centres(len(a), *layout[layer]), start, end)
-            assert has_frames.all(), f"{path.stem}, {layer}: an eGeMAPS window without conv frames"
-            aligned["A"][layer].append(means)
-            aligned["B"][layer].append(smooth3(means))
-    names = eg["names"]
+    names, aligned_a, egemaps, voiced = load_aligned(cfg, args.dataset, args.model, layout, transforms)
+    aligned = {"A": aligned_a, "B": {layer: [smooth3(m) for m in means] for layer, means in aligned_a.items()}}
     print(f"{args.model} on {args.dataset}: {len(egemaps)} clips, {sum(map(len, egemaps))} frames, "
           f"{int(sum(v.sum() for v in voiced))} voiced")
 
-    nz = torch.tensor([name.endswith("nz") for name in names])
-    keep = [v.sum() >= 3 for v in voiced]  # clips with almost no voiced frames say nothing about pitch
-
-    def per_descriptor(fn, acts):
-        """fn(acts, descriptors) on all frames for the plain descriptors and on voiced frames
-        for the nz ones, put back together in the order of names (last axis)."""
-        plain = fn(acts, [e[:, ~nz] for e in egemaps])
-        voiced_only = fn([a[v] for a, v, k in zip(acts, voiced, keep) if k],
-                         [e[v][:, nz] for e, v, k in zip(egemaps, voiced, keep) if k])
-        out = torch.empty(plain.shape[:-1] + (len(names),))
-        out[..., ~nz], out[..., nz] = plain, voiced_only
-        return out
-
-    r = {version: {layer: per_descriptor(within_clip_correlation, acts) for layer, acts in by_layer.items()}
-         for version, by_layer in aligned.items()}
-    r2 = {layer: per_descriptor(heldout_r2, acts) for layer, acts in aligned["A"].items()}
-    unit = "SAE unit" if saes else "channel"
+    r = {version: {layer: per_descriptor(within_clip_correlation, acts, egemaps, voiced, names)
+                   for layer, acts in by_layer.items()} for version, by_layer in aligned.items()}
+    r2 = {layer: per_descriptor(heldout_r2, acts, egemaps, voiced, names) for layer, acts in aligned["A"].items()}
+    unit = "SAE unit" if transforms else "channel"
     print(f"Held-out R² of all {unit}s, (best single {unit} r²), version A:")
     for name in ("Loudness_sma3", ALPHA_RATIO, F0, "jitterLocal_sma3nz"):
         i = names.index(name)
         print(f"  {name[:20]:>20} " + "  ".join(
             f"{layer} {r2[layer][i]:.2f} ({r['A'][layer][:, i].pow(2).max():.2f})" for layer in layers))
 
-    suffix = f"_sae{args.sae}" if saes else ""
+    suffix = f"_sae{args.sae}" if transforms else ""
     out = cfg["paths"]["output_dir"] / "frame_correlation" / f"{args.dataset}_{args.model}{suffix}.pt"
     out.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"names": names, "layers": layers, "n_clips": len(egemaps), "r": r, "r2": r2,
                 "conv0_filters": filters, "norm_gain": norm_gain, "sae": args.sae}, out)
     print(f"Saved → {out}")
-    if not saes:  # units have no filter weights
+    if not transforms:  # units have no filter weights
         plot_alpha_ratio(r["A"]["conv_0"], names, filters, norm_gain["conv_0"].abs() > ACTIVE, args.model, out.with_name(f"{out.stem}_alpha_ratio.png"))
 
 
