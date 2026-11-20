@@ -39,3 +39,5 @@ config.local.yaml
 logs/
 
 notes/
+
+uv.lock
